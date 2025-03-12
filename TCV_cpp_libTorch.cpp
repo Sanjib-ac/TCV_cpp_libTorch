@@ -7,7 +7,7 @@
 #include<torch/csrc/cuda/device_set.h>
 
 #include<opencv2/core.hpp>
-void checkVersions()
+static void checkVersions()
 {    
     std::cout << "LibTorch-"<< std::endl;
     std::cout << "CUDA available: " << torch::cuda::is_available() << std::endl;
@@ -33,6 +33,7 @@ private:
     int value = 0;
     torch::jit::Module network;
     torch::DeviceType device_type;
+    int device;
 
     // 
     int _real_net_width;
@@ -73,7 +74,19 @@ private:
 
 public:
     // Constructor
-    TCV_test(std::string model, int real_net_width = 640, int real_net_height = 640, int frame_h = 960, int frame_w = 1280, float conf= 0.6, float iou= 0.6, int device=0)
+    TCV_test(): _modelName(""), _real_net_width(640), _real_net_height(640), _ori_height(960), _ori_width(1280), _score_thre(0.6), _iou_thre(0.6), device(0)
+    {        
+        SetDevice(device);
+        //std::cout << "Constructor1";
+        colors = {
+            cv::Vec3b(0, 0, 255),  // Red
+            cv::Vec3b(0, 255, 0),  // Green
+            cv::Vec3b(255, 0, 0),  // Blue
+        };
+
+    }
+    //Constructor 2
+    TCV_test(std::string model, int real_net_width = 640, int real_net_height = 640, int frame_h = 960, int frame_w = 1280, float conf = 0.6, float iou = 0.6, int device = 0)
     {
         int dev = device;
         SetDevice(dev);
@@ -91,6 +104,7 @@ public:
         };
 
     }
+
 
     void SetDevice(int deviceNum)
     {
@@ -131,7 +145,11 @@ int main()
 
     std::cout << "Hello World!\n";
     checkVersions();
-    TCV_test tcv("te", 640, 640, 960, 1280, 0.5, 0.6, 1);
+    std::cout << '\n';
+    TCV_test tcv;
+    std::cout << '\n';
+    TCV_test tcv2("te", 640, 640, 960, 1280, 0.5, 0.6, 1);
+
 
 }
 
