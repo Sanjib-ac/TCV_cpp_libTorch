@@ -2,11 +2,18 @@
 //
 
 #include <iostream>
+#include <filesystem>
+#include <opencv2/dnn.hpp>
+#include <vector>
+#include <memory>
+#include <string>
+
 #include<torch/script.h>
 #include<torch/torch.h>
 #include<torch/csrc/cuda/device_set.h>
 
 #include<opencv2/core.hpp>
+#include<opencv2/opencv.hpp>
 static void checkVersions()
 {    
     std::cout << "LibTorch-"<< std::endl;
@@ -34,6 +41,7 @@ private:
     torch::jit::Module network;
     torch::DeviceType device_type;
     int device;
+    std::vector<std::string> class_labels; // Classes
 
     // 
     int _real_net_width;
@@ -58,15 +66,21 @@ private:
     // Tensor holding the predicted locations
     torch::Tensor predLoc;
 
+   
+
     // Structure of detected objects
     struct Object {
-        float left;
-        float top;
-        float right;
-        float bottom;
+        int left;
+        int top;
+        int right;
+        int bottom;
         float score;
         int classId;
     };
+
+    //
+    std::vector<std::shared_ptr<Object>> detections;
+
     // Colors for visualization
     std::vector<cv::Vec3b> colors;
 
@@ -74,7 +88,7 @@ private:
 
 public:
     // Constructor
-    TCV_test(): _modelName(""), _real_net_width(640), _real_net_height(640), _ori_height(960), _ori_width(1280), _score_thre(0.6), _iou_thre(0.6), device(0)
+    TCV_test(): _modelName(""), _real_net_width(1280), _real_net_height(960), _ori_height(960), _ori_width(1280), _score_thre(0.6), _iou_thre(0.6), device(0)
     {        
         SetDevice(device);
         //std::cout << "Constructor1";
@@ -126,17 +140,175 @@ public:
         std::cout <<"Device set to: "  << (device_type == torch::kCPU ? "CPU" : "GPU") << std::endl;
     }
 
-    int LoadModel(char* modelPath)
-        try {
-        network = torch::jit::load(modelPath, device_type);
-        network.eval();
+    int LoadModel(const std::filesystem::path& modelPath)
+    { 
+        try
+            {
+            //std::cout << "Loading the model";
+            //std::cout << device_type;
+            network = torch::jit::load(modelPath.string(), device_type);
+            network.eval();
+            if (!network.find_method("forward"))
+                {
+                std::cerr << "Model loaded, but forward method is missing!" << std::endl;
+                }
+        
+            std::cout << "Loaded the model successfully.";
+            return 0;
+            }
+        catch (const c10::Error& e)
+            {
+            std::cout << "Model reading failed .. " << e.what() << std::endl;
+            return -1;
+            }
+    }
+    int loadClassLabels(const std::filesystem::path& class_names)
+    {
+        std::ifstream file(class_names);
+        if (!file) return -1;
+        class_labels.assign((std::istream_iterator<std::string>(file)), std::istream_iterator<std::string>());
+        std::cout<<'\n' << class_labels << std::endl;
+        return 0;
 
     }
-    catch (const c10::Error& e)
+    int loadClassLabels1(const std::filesystem::path& class_names)
     {
-        std::cout << "Model reading failed .. " << std::endl;
+        std::ifstream file(class_names);
+        if (!file.is_open())
+        {
+        std::cerr << "Error loading class name file";
+        return -1;
+        }
+        std::string line;
+        while(std::getline(file, line))
+        {
+            class_labels.push_back(line);
+        }
+        std::cout << class_labels << std::endl;
+        return 0;
     }
-    
+    void nonMaxSuppression(torch::Tensor preds)
+    {
+        dets_vec.clear();
+
+
+    }
+    void postProcess(const torch::Tensor& detections, int img_width, int img_height)
+    {
+        //detections.to(device_type);
+        this->detections.clear();
+
+        std::vector<cv::Rect> boxes;
+        std::vector<float> scores;
+        std::vector<int> class_ids;
+
+        for (int i = 0; i < detections.size(0); i++) 
+        {
+            float conf = detections[i][4].item<float>();
+            if (conf < _score_thre) continue;
+
+            int center_x = static_cast<int>(detections[i][0].item<float>() * img_width);
+            int center_y = static_cast<int>(detections[i][1].item<float>() * img_height);
+            int width = static_cast<int>(detections[i][2].item<float>() * img_width);
+            int height = static_cast<int>(detections[i][3].item<float>() * img_height);
+
+            int left = center_x - width / 2;
+            int top = center_y - height / 2;
+            int right = center_x + width / 2;
+            int bottom = center_y + height / 2;
+
+            boxes.emplace_back(left, top, width, height);
+            scores.push_back(conf);
+            class_ids.push_back(detections[i][5].item<int>());
+        }
+        std::vector<int> indices;
+        cv::dnn::NMSBoxes(boxes, scores, _score_thre, _iou_thre, indices);
+
+        for (int idx : indices) 
+        {
+            auto obj = std::make_shared<Object>(Object{
+                boxes[idx].x,
+                boxes[idx].y,
+                boxes[idx].x + boxes[idx].width,
+                boxes[idx].y + boxes[idx].height,
+                scores[idx],
+                class_ids[idx]
+                });
+
+            this->detections.push_back(obj);
+        }
+        std::cout << detections << std::endl;
+    }
+    const std::vector<std::shared_ptr<Object>>& getDetections() const
+    {
+        return detections;
+    }
+    void detect(const cv::Mat& image)
+    {
+        cv::Mat img_resized;
+        cv::resize(image, img_resized, cv::Size(_real_net_width, _real_net_height));        
+
+        img_resized.convertTo(img_resized, CV_32F, 1.0 / 255.0);
+        auto tensor_img = torch::from_blob(img_resized.data, { 1, _real_net_height, _real_net_width, 3 }, torch::kFloat32)
+            .permute({ 0, 3, 1, 2 })
+            .to(device_type);
+        auto output = network.forward({ tensor_img }).toTensor();
+        postProcess(output, image.cols, image.rows);
+    }
+    void CaptureCam(int index)
+    {
+        cv::VideoCapture cap(index);
+        if (!cap.isOpened()) {
+            std::cerr << "Error: Could not open webcam.\n";
+            return;
+        }
+        // Get Frame size
+        double frameWidth = cap.get(cv::CAP_PROP_FRAME_WIDTH);
+        double frameHeight = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
+
+        // Display the frame size
+        std::cout << "Frame width: " << frameWidth << std::endl;
+        std::cout << "Frame height: " << frameHeight << std::endl;
+
+        // Set the frame size using the `set` function
+        cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
+        cap.set(cv::CAP_PROP_FRAME_HEIGHT, 960);
+
+        // Get the actual frame size to verify the change
+        double NframeWidth = cap.get(cv::CAP_PROP_FRAME_WIDTH);
+        double NframeHeight = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
+
+        std::cout << "Set frame width: " << NframeWidth << std::endl;
+        std::cout << "Set frame height: " << NframeHeight << std::endl;
+
+        cv::Mat frame;
+
+        while (cap.read(frame)) 
+        {
+            std::cout << "Reading frame" << std::endl;
+            /* 
+            detect(frame);  // Detect objects in the frame
+
+            // Draw bounding boxes on the frame
+            for (const auto& obj : detections) {
+                cv::rectangle(frame, cv::Point(obj->left, obj->top), cv::Point(obj->right, obj->bottom), cv::Scalar(0, 255, 0), 2);
+                cv::putText(frame, class_labels[obj->classId], cv::Point(obj->left, obj->top), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 2);
+            }
+            */
+            // Display the resulting frame
+            cv::imshow("YOLOv11 - Webcam Detection", frame);
+
+            // Exit when 'q' is pressed
+            if (cv::waitKey(1) == 'q') {
+                break;
+            }
+        }
+
+        cap.release();  // Release the webcam
+        cv::destroyAllWindows();  // Destroy all OpenCV windows
+
+
+    }
 };
 
 
@@ -146,10 +318,24 @@ int main()
     std::cout << "Hello World!\n";
     checkVersions();
     std::cout << '\n';
-    TCV_test tcv;
+    //TCV_test tcv;
     std::cout << '\n';
-    TCV_test tcv2("te", 640, 640, 960, 1280, 0.5, 0.6, 1);
+    TCV_test tcv2("te", 960, 1280, 960, 1280, 0.5, 0.6, 0);
+    //tcv2.SetDevice(1);
+    //std::filesystem::path modelPath = "D:/VS/TCV_cpp_libTorch/model/nws_960_1280.pt";
+    std::filesystem::path modelPath = "./model/nws_960_1280_b8.torchscript";
 
+    if (!std::filesystem::exists(modelPath)) {
+        std::cerr << "Error: Model file not found at " << modelPath << std::endl;
+    }
+    else {
+        std::cout << "Model file found, now loading..."<< std::endl;
+        //tcv2.LoadModel(modelPath);
+    }
+    std::filesystem::path classNamelPath = "./model/classes.names";
+    tcv2.loadClassLabels(classNamelPath);
+    tcv2.CaptureCam(0);
+    return 0;
 
 }
 
