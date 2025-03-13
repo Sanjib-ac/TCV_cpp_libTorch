@@ -100,7 +100,7 @@ public:
 
     }
     //Constructor 2
-    TCV_test(std::string model, int real_net_width = 640, int real_net_height = 640, int frame_h = 960, int frame_w = 1280, float conf = 0.6, float iou = 0.6, int device = 0)
+    TCV_test(std::string model, int real_net_height = 640, int real_net_width = 640, int frame_h = 960, int frame_w = 1280, float conf = 0.6, float iou = 0.6, int device = 0)
     {
         int dev = device;
         SetDevice(dev);
@@ -131,8 +131,11 @@ public:
             if (torch::cuda::is_available())
             {
                 device_type = torch::kCUDA; // use gpu
+                //device_type = at::kCUDA;
+                std::cout << "Setting device_type: " << device_type << std::endl;
             }
             else {
+                //device_type = at::kCPU; 
                 device_type = torch::kCPU; // Fall back to CPU
                 std::cout << "NO CUDA AVIALVE" << std::endl;
             }     
@@ -145,8 +148,16 @@ public:
         try
             {
             //std::cout << "Loading the model";
-            //std::cout << device_type;
-            network = torch::jit::load(modelPath.string(), device_type);
+            
+
+           // Ensure model path is valid
+            if (modelPath.empty())
+            {
+                std::cerr << "Error MOdel path is empty!" << std::endl;
+            }
+            std::cout << "Model absolute path: " << std::filesystem::absolute(modelPath) << std::endl;
+            network = torch::jit::load(modelPath.string());            
+            network.to(device_type);
             network.eval();
             if (!network.find_method("forward"))
                 {
@@ -245,21 +256,84 @@ public:
     }
     void detect(const cv::Mat& image)
     {
+        if (image.empty()) {
+            std::cerr << "Error: Input image is empty!" << std::endl;
+            return;
+        }
         cv::Mat img_resized;
-        cv::resize(image, img_resized, cv::Size(_real_net_width, _real_net_height));        
+        // Resize the image to match the input dimensions of the model
+        cv::resize(image, img_resized, cv::Size(_real_net_width, _real_net_height));
 
-        img_resized.convertTo(img_resized, CV_32F, 1.0 / 255.0);
-        auto tensor_img = torch::from_blob(img_resized.data, { 1, _real_net_height, _real_net_width, 3 }, torch::kFloat32)
-            .permute({ 0, 3, 1, 2 })
+        if (img_resized.empty()) {
+            std::cerr << "Error: Resized image is empty!" << std::endl;
+            return;
+        }
+
+        std::cout << "Input Frame Shape: " << img_resized.size() << std::endl;
+
+        // Convert the color space from BGR to RGB (the model expects RGB input)
+        cv::cvtColor(img_resized, img_resized, cv::COLOR_BGR2RGB);
+
+        // Normalize the image to [0, 1]
+        img_resized.convertTo(img_resized, CV_32FC3, 1.0f / 255.0f);
+
+        if (!img_resized.isContinuous()) {
+            img_resized = img_resized.clone();
+        }
+        /* 
+        torch::Tensor tensor_img = torch::from_blob(img_resized.data, { _real_net_width, _real_net_height, 3 }, torch::kFloat);
+            //.permute({ 0, 3, 1, 2 })
+            //.to(device_type);
+        // Permute dimensions to match the model's expected input [C, H, W] format
+        tensor_img = tensor_img.permute({ 2, 0, 1 });
+        //Add batch dimension
+        tensor_img = tensor_img.unsqueeze(0);
+        */
+        
+        torch::Tensor tensor_img =torch::from_blob(img_resized.data, { 1, 3, _real_net_height, _real_net_width}, torch::kFloat)
+            //.permute({2, 0, 1})
+            //.unsqueeze(0)
             .to(device_type);
-        auto output = network.forward({ tensor_img }).toTensor();
-        postProcess(output, image.cols, image.rows);
+        //tensor_img = tensor_img.to(at::kCUDA);
+        std::cout << "Input Tensor Shape: " << tensor_img.sizes() << std::endl;
+
+        if (img_resized.empty()) {
+            std::cerr << "Error: Resized image is empty!" << std::endl;
+            return;
+        }
+
+        //tensor_img = tensor_img.to(at::kCUDA);
+
+        // Create a vector of IValue to pass the tensor to the model
+        std::vector<torch::jit::IValue> inputs{tensor_img};
+
+        //inputs.push_back(std::move(tensor_img));  // Add the input tensor to the vector
+        // Enable inference mode for efficiency.
+        //torch::InferenceMode guard(true);
+        //network.to(at::kCUDA);
+        if (!network.find_method("forward")) {
+            std::cerr << "Error: Model is not loaded correctly!" << std::endl;
+            return;
+        }
+        try 
+        {
+            torch::jit::IValue output = network.forward(inputs);
+        }
+        catch (const c10::Error& e) 
+        {
+            std::cerr << "Error during inference: " << e.what() << std::endl;
+            // Additional information about inputs and output
+            std::cerr << "Inputs size: " << inputs.size() << std::endl;            
+        }
+        //auto preds = output.toTuple()->elements()[0].toTensor();
+
+        //postProcess(preds, image.cols, image.rows);
     }
-    void CaptureCam(int index)
+    void CaptureCam(int index, int h = 736, int w = 1280)
     {
         cv::VideoCapture cap(index);
         if (!cap.isOpened()) {
-            std::cerr << "Error: Could not open webcam.\n";
+            std::cerr << "Error: Could not open the camera.\n";
             return;
         }
         // Get Frame size
@@ -267,28 +341,28 @@ public:
         double frameHeight = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
 
         // Display the frame size
-        std::cout << "Frame width: " << frameWidth << std::endl;
-        std::cout << "Frame height: " << frameHeight << std::endl;
+        std::cout << "Before Frame width: " << frameWidth << std::endl;
+        std::cout << "Before Frame height: " << frameHeight << std::endl;
 
         // Set the frame size using the `set` function
-        cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
-        cap.set(cv::CAP_PROP_FRAME_HEIGHT, 960);
+        cap.set(cv::CAP_PROP_FRAME_WIDTH, w);
+        cap.set(cv::CAP_PROP_FRAME_HEIGHT, h);
 
         // Get the actual frame size to verify the change
         double NframeWidth = cap.get(cv::CAP_PROP_FRAME_WIDTH);
         double NframeHeight = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
 
-        std::cout << "Set frame width: " << NframeWidth << std::endl;
-        std::cout << "Set frame height: " << NframeHeight << std::endl;
+        std::cout << "After frame width: " << NframeWidth << std::endl;
+        std::cout << "After frame height: " << NframeHeight << std::endl;
 
         cv::Mat frame;
 
         while (cap.read(frame)) 
         {
             std::cout << "Reading frame" << std::endl;
-            /* 
+             
             detect(frame);  // Detect objects in the frame
-
+            /*
             // Draw bounding boxes on the frame
             for (const auto& obj : detections) {
                 cv::rectangle(frame, cv::Point(obj->left, obj->top), cv::Point(obj->right, obj->bottom), cv::Scalar(0, 255, 0), 2);
@@ -316,21 +390,23 @@ int main()
 {
 
     std::cout << "Hello World!\n";
+    cv::setNumThreads(0);
     checkVersions();
     std::cout << '\n';
     //TCV_test tcv;
     std::cout << '\n';
-    TCV_test tcv2("te", 960, 1280, 960, 1280, 0.5, 0.6, 0);
+    TCV_test tcv2("te", 720, 1280, 720, 1280, 0.5, 0.6, 0);
     //tcv2.SetDevice(1);
     //std::filesystem::path modelPath = "D:/VS/TCV_cpp_libTorch/model/nws_960_1280.pt";
-    std::filesystem::path modelPath = "./model/nws_960_1280_b8.torchscript";
+    std::filesystem::path modelPath = "D:/VS/TCV_cpp_libTorch/model/nws_736_1280_b1.torchscript";
 
     if (!std::filesystem::exists(modelPath)) {
         std::cerr << "Error: Model file not found at " << modelPath << std::endl;
+        
     }
     else {
         std::cout << "Model file found, now loading..."<< std::endl;
-        //tcv2.LoadModel(modelPath);
+        tcv2.LoadModel(modelPath);
     }
     std::filesystem::path classNamelPath = "./model/classes.names";
     tcv2.loadClassLabels(classNamelPath);

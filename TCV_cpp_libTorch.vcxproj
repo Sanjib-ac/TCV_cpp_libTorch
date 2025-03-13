@@ -71,7 +71,8 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <ExternalIncludePath>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\include;C:\libtorch-win-shared-with-deps-debug-2.6.0+cu124\libtorch\include;C:\opencv\build\include;$(ExternalIncludePath)</ExternalIncludePath>
+    <ExternalIncludePath>C:\libtorch-win-shared-with-deps-debug-2.6.0+cu124\libtorch\include\torch\csrc\api\include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\include;C:\libtorch-win-shared-with-deps-debug-2.6.0+cu124\libtorch\include;C:\opencv\build\include;$(ExternalIncludePath)</ExternalIncludePath>
+    <LibraryPath>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\lib;C:\opencv\build\x64\vc16\lib;C:\libtorch-win-shared-with-deps-debug-2.6.0+cu124\libtorch\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LibraryPath>C:\libtorch_26_cu124\lib;$(LibraryPath)</LibraryPath>
@@ -111,15 +112,16 @@
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\libtorch-win-shared-with-deps-debug-2.6.0+cu124\libtorch\include;C:\libtorch-win-shared-with-deps-debug-2.6.0+cu124\libtorch\include\torch\csrc\api\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <ConformanceMode>false</ConformanceMode>
+      <AdditionalIncludeDirectories>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\include;C:\opencv\build\include;C:\libtorch-win-shared-with-deps-debug-2.6.0+cu124\libtorch\include;C:\libtorch-win-shared-with-deps-debug-2.6.0+cu124\libtorch\include\torch\csrc\api\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>torch_cuda.lib;c10_cuda.lib;C:\libtorch-win-shared-with-deps-debug-2.6.0+cu124\libtorch\lib\*.lib;C:\opencv\build\x64\vc16\lib\*.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\lib\x64\*.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>C:\libtorch-win-shared-with-deps-debug-2.6.0+cu124\libtorch\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>C:\libtorch-win-shared-with-deps-debug-2.6.0+cu124\libtorch\lib\*.lib;C:\opencv\build\x64\vc16\lib\*.lib;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\lib\x64\*.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\lib;C:\opencv\build\x64\vc16\lib;C:\libtorch-win-shared-with-deps-debug-2.6.0+cu124\libtorch\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>/INCLUDE:"?warp_size@cuda@at@@YAHXZ" %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
