@@ -4,6 +4,7 @@
 #include <iostream>
 #include <filesystem>
 #include <opencv2/dnn.hpp>
+#include <opencv2/core/utils/tls.hpp>
 #include <vector>
 #include <memory>
 #include <string>
@@ -14,6 +15,7 @@
 
 #include<opencv2/core.hpp>
 #include<opencv2/opencv.hpp>
+#include "opencv2/core/core_c.h"
 static void checkVersions()
 {    
     std::cout << "LibTorch-"<< std::endl;
@@ -24,9 +26,10 @@ static void checkVersions()
         << TORCH_VERSION_MINOR << "."
         << TORCH_VERSION_PATCH << std::endl;
 
-    std::cout << "OpenCV version : " << CV_VERSION << std::endl;   
-     
+    std::cout << "OpenCV version : " << CV_VERSION << std::endl;
+    //std::cout << "OpenCV is using: " << cv::getThreadStrategyName() << std::endl;
 
+   
     //std::cout << torch::show_config() << std::endl;
     //torch::Tensor a = torch::ones({ 2, 2 }).to(torch::kCUDA);
     //torch::Tensor b = torch::randn({ 2, 2 }).to(torch::kCUDA);
@@ -318,20 +321,52 @@ public:
         try 
         {
             torch::jit::IValue output = network.forward(inputs);
+            //std::cout << "OUT:" << output << std::endl;
+
+             // Handle the output based on its type
+            if (output.isTensor()) {
+                std::cout << "Predicted result: ";
+                /// If the output is a tensor, convert it to a std::vector of floats
+                torch::Tensor output_tensor = output.toTensor();
+
+                // Convert the tensor to a list (std::vector in this case)
+                //std::vector<float> output_list(output_tensor.data_ptr<float>(), output_tensor.data_ptr<float>() + output_tensor.numel());
+
+                // Print the result (for example, first 5 elements)
+                /*std::cout << "Predicted result: ";
+                for (size_t i = 0; i < std::min(output_list.size(), size_t(5)); ++i) {
+                    std::cout << output_list[i] << " ";
+                }
+                std::cout << std::endl;*/
+            }
+            else if (output.isTuple()) {
+                // If output is a tuple
+                auto output_tuple = output.toTuple();
+                auto preds = output_tuple->elements()[0].toTensor();
+               // std::cout << "Predictions tensor from tuple: " << preds << std::endl;
+                postProcess(preds, image.cols, image.rows);
+            }
+            else {
+                std::cerr << "Error: Output is neither a tensor nor a tuple!" << std::endl;
+            }
+            
+            
         }
+        catch (const std::runtime_error& e) {
+            std::cerr << "Runtime error: " << e.what() << std::endl;
+        }
+
         catch (const c10::Error& e) 
         {
             std::cerr << "Error during inference: " << e.what() << std::endl;
             // Additional information about inputs and output
-            std::cerr << "Inputs size: " << inputs.size() << std::endl;            
+            //std::cerr << "Inputs size: " << inputs.size() << std::endl;            
         }
-        //auto preds = output.toTuple()->elements()[0].toTensor();
-
-        //postProcess(preds, image.cols, image.rows);
+        
     }
     void CaptureCam(int index, int h = 736, int w = 1280)
     {
-        cv::VideoCapture cap(index);
+        cv::VideoCapture cap(index,cv::CAP_MSMF);
         if (!cap.isOpened()) {
             std::cerr << "Error: Could not open the camera.\n";
             return;
@@ -383,21 +418,54 @@ public:
 
 
     }
+    int Image()
+    {
+        // Path to the image you want to read
+        std::string imagePath = "D:/VS/TCV_cpp_libTorch/model/test_img.jpg";
+
+        // Read the image
+        cv::Mat image = cv::imread(imagePath, cv::IMREAD_COLOR);  // Read image in color mode
+
+        // Check if the image is loaded successfully
+        if (image.empty()) {
+            std::cerr << "Could not open or find the image at: " << imagePath << std::endl;
+            return -1;  // Exit if the image is not loaded
+        }
+        detect(image);
+        // Create a window to display the image
+        cv::namedWindow("Image", cv::WINDOW_NORMAL);
+
+        // Display the image in the created window
+        cv::imshow("Image", image);
+
+        // Wait indefinitely for any key press
+        cv::waitKey(0);
+
+        // Close the window when a key is pressed
+        cv::destroyAllWindows();
+
+        return 0;
+    }
 };
 
 
 int main()
 {
-
+    //cv::setNumThreads(0);  // Disable OpenCV parallel threading
+    //cv::ocl::setUseOpenCL(false);  // Disable OpenCL (optional)
+    //torch::set_num_threads(1);
+    //_putenv("OMP_NUM_THREADS=1");
+    //_putenv("OPENCV_ENABLE_PLUGINS=0");
+    //cv::setNumThreads(0);
     std::cout << "Hello World!\n";
-    cv::setNumThreads(0);
+    //cv::setNumThreads(0);
     checkVersions();
     std::cout << '\n';
     //TCV_test tcv;
     std::cout << '\n';
-    TCV_test tcv2("te", 720, 1280, 720, 1280, 0.5, 0.6, 0);
+    TCV_test tcv2("te", 736, 1280, 736, 1280, 0.5, 0.6, 1);
     //tcv2.SetDevice(1);
-    //std::filesystem::path modelPath = "D:/VS/TCV_cpp_libTorch/model/nws_960_1280.pt";
+    //std::filesystem::path modelPath = "D:/VS/TCV_cpp_libTorch/model/best.pt";
     std::filesystem::path modelPath = "D:/VS/TCV_cpp_libTorch/model/nws_736_1280_b1.torchscript";
 
     if (!std::filesystem::exists(modelPath)) {
@@ -409,8 +477,10 @@ int main()
         tcv2.LoadModel(modelPath);
     }
     std::filesystem::path classNamelPath = "./model/classes.names";
-    tcv2.loadClassLabels(classNamelPath);
+    //tcv2.loadClassLabels(classNamelPath);
     tcv2.CaptureCam(0);
+    tcv2.Image();
+
     return 0;
 
 }
